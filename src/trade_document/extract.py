@@ -216,6 +216,12 @@ def populate(order, sources, highlights):
             unresolved.append(f"Draft and source disagree on {e.field}")
             continue
         target[key] = value
+    for evidence in extracted.evidence:
+        if (
+            evidence.field in extracted.conflicts
+            or f"Draft and source disagree on {evidence.field}" in unresolved
+        ):
+            evidence.status = "disputed"
     valid_items = []
     for sku, item in items.items():
         try:

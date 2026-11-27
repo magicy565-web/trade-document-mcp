@@ -20,7 +20,7 @@ An empty reviewer registry permits drafts and previews. See [operator instructio
 
 1. Call `extract_order_information` with named chat, quote or product sources. Accepted inputs include text, labeled lines, SKU CSV, simple XLSX tables and PDFs with a text layer. For free prose, the host can supply field candidates with verbatim source lines. Review unmatched text and conflicts.
 2. Call `create_order_draft` with a document kind and the same sources/highlights to apply unambiguous values. Alternatively provide a reviewed structured order. `update_order_draft` accepts a full replacement and an expected version. `get_order_draft` accepts a historical version.
-3. Call `calculate_order`, `validate_order`, then `preview_document`. Unknown fees remain unknown. Drafts need calculable amounts for file previews.
+3. Call `calculate_order`, `validate_order`, then `preview_document`. Unknown fees remain unknown. Draft previews mark unknown values and totals as Pending. To clarify a specific field, call `update_order_draft` with `resolutions` instead of a replacement order and include its source, line, and quote.
 4. Send the structured output of `request_approval` and matching previews to the assigned reviewer through your existing internal process. The reviewer signs locally. `generate_document` accepts the returned proof. It verifies the current revision inside the database transaction and audits both files before returning local paths. Use `audit_document` for later integrity checks. External delivery is manual.
 
 Use `list_templates` and `register_template` for built-in types and bounded enterprise layouts. See [template contract](docs/templates.md).
@@ -34,4 +34,6 @@ python tools/evaluate.py
 python tools/demo.py /tmp/trade-doc-examples
 ```
 
-The demo uses an ephemeral fixture signer and produces editable sample PI and sample order workbooks and PDFs. It reads only the checked-in fictional fixture. All artifacts stay outside git. The cohort evaluation includes incomplete and conflicting intakes in its denominator. It uses simulated reviewer signatures. Real first-pass acceptance, field accuracy and workload require independent professional adjudication.
+The demo uses an ephemeral fixture signer and produces editable workbooks and PDFs for the four built-in document types. It reads only the checked-in fictional fixture. All artifacts stay outside git. The parameterized smoke run includes incomplete and conflicting intakes in its denominator. The separately authored V0.1 acceptance cases are in `fixtures/acceptance` and run under Pytest. It uses simulated reviewer signatures. Real first-pass acceptance, field accuracy and workload require independent professional adjudication.
+
+路线图各阶段的实施和待签核项目见 [验收对照](docs/roadmap-verification.md)。

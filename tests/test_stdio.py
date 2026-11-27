@@ -95,6 +95,23 @@ def test_real_stdio(order, tmp_path):
                 "update_order_draft",
                 {**rev, "order": {**order_data, "freight": "19.00"}},
             )
+            revised = await call(
+                "update_order_draft",
+                {
+                    **oid,
+                    "expected_version": 2,
+                    "resolutions": [
+                        {
+                            "field": "freight",
+                            "value": "17.00",
+                            "source": "QA final quote",
+                            "line": 2,
+                            "quote": "Freight: 17.00",
+                        }
+                    ],
+                },
+            )
+            assert revised["order"]["freight"] == "17.00"
             await call("generate_document", valid, True)
             await call("update_order_draft", {**rev, "order": order_data}, True)
 

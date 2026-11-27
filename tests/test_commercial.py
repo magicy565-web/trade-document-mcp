@@ -1,5 +1,4 @@
 from decimal import Decimal
-import pytest
 from trade_document import server
 from trade_document.model import Order, calculate, issues
 

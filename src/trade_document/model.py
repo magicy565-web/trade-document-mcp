@@ -25,6 +25,20 @@ class Line(Model):
     unit: Text | None = None
     unit_price: Amount | None = None
     image: str | None = Field(default=None, max_length=1000000)
+    additional_images: list[Annotated[str, Field(min_length=1, max_length=1000000)]] = (
+        Field(default_factory=list, max_length=2)
+    )
+    variant: Text | None = None
+
+    def images(self):
+        return ([self.image] if self.image else []) + self.additional_images
+
+    def descriptions(self):
+        return [
+            value
+            for value in (self.description, self.variant, self.specification)
+            if value
+        ]
 
 
 class Milestone(Model):
@@ -33,9 +47,9 @@ class Milestone(Model):
 
 
 class Evidence(Model):
-    status: Literal["candidate", "requested", "quoted", "confirmed", "disputed"] = (
-        "candidate"
-    )
+    status: Literal[
+        "candidate", "requested", "quoted", "confirmed", "disputed", "superseded"
+    ] = "candidate"
     field: str
     value: str
     source: str
@@ -43,7 +57,44 @@ class Evidence(Model):
     quote: str
 
 
+class Address(Model):
+    street: Text
+    city: Text
+    country: Annotated[str, StringConstraints(pattern=r"^[A-Z]{2}$")]
+    region: Text | None = None
+    postal_code: Text | None = None
+
+    def display(self):
+        return ", ".join(
+            part
+            for part in (
+                self.street,
+                self.city,
+                self.region,
+                self.postal_code,
+                self.country,
+            )
+            if part
+        )
+
+
+class Party(Model):
+    role: Literal["seller", "buyer", "ship_to"]
+    legal_name: Text
+    address: Address
+
+
+class DeliveryTerm(Model):
+    term: Text
+    named_place: Text
+    edition: Text
+
+
 class Order(Model):
+    parties: list[Party] = Field(default_factory=list, max_length=3)
+    delivery_term: DeliveryTerm | None = None
+    sample_acceptance: Text | None = None
+
     paper: Literal["A4", "Letter"] = "A4"
     valid_until: date | None = None
     ship_to: Text | None = None
@@ -60,6 +111,8 @@ class Order(Model):
     currency: Currency | None = None
     items: list[Line] = Field(default_factory=list, max_length=200)
     freight: Amount | None = None
+    insurance: Amount | None = None
+    tooling_fee: Amount | None = None
     sample_fee: Amount | None = None
     discount: Amount | None = None
     sample_policy: Literal["free", "charged"] | None = None
@@ -93,7 +146,10 @@ def calculate(o: Order) -> Totals:
             "Currency, items and explicit freight, fee and discount required"
         )
     q = quantum(o)
-    if any(x != x.quantize(q) for x in (o.freight, o.sample_fee, o.discount)):
+    additional = [fee for fee in (o.insurance, o.tooling_fee) if fee is not None]
+    if any(
+        x != x.quantize(q) for x in (o.freight, o.sample_fee, o.discount, *additional)
+    ):
         raise ValueError("Fees and discount must use currency precision")
     lines = []
     for item in o.items:
@@ -101,7 +157,7 @@ def calculate(o: Order) -> Totals:
             raise ValueError(f"Missing quantity or unit price for {item.sku}")
         lines.append((item.quantity * item.unit_price).quantize(q, ROUND_HALF_UP))
     subtotal = sum(lines, Decimal(0))
-    total = subtotal + o.freight + o.sample_fee - o.discount
+    total = subtotal + o.freight + o.sample_fee + sum(additional) - o.discount
     if total < 0 or total >= Decimal("1000000000000"):
         raise ValueError("Total outside supported Excel precision")
     installments = []
@@ -124,7 +180,16 @@ def calculate(o: Order) -> Totals:
     )
 
 
-def issues(o: Order) -> list[str]:
+def document_totals(order: Order, draft: bool) -> Totals | None:
+    if not draft:
+        return calculate(order)
+    try:
+        return calculate(order)
+    except ValueError:
+        return None
+
+
+def issues(o: Order, beneficiaries: dict[str, str] | None = None) -> list[str]:
     required = [
         "number",
         "issue_date",
@@ -141,12 +206,24 @@ def issues(o: Order) -> list[str]:
     errors = [f"Missing {k}" for k in required if not getattr(o, k)]
     if len({i.sku for i in o.items}) != len(o.items):
         errors.append("Duplicate SKU")
+    if len({party.role for party in o.parties}) != len(o.parties):
+        errors.append("Duplicate party role")
+    for party in o.parties:
+        if (
+            party.role in ("seller", "buyer")
+            and getattr(o, party.role) != party.legal_name
+        ):
+            errors.append(f"Party name differs from {party.role}")
     if o.valid_until and o.issue_date and o.valid_until < o.issue_date:
         errors.append("Validity ends before issue date")
     if o.bank or o.beneficiary_ref:
         import os, json
 
-        verified = json.loads(os.environ.get("TRADE_DOC_BENEFICIARIES", "{}"))
+        verified = (
+            json.loads(os.environ.get("TRADE_DOC_BENEFICIARIES", "{}"))
+            if beneficiaries is None
+            else beneficiaries
+        )
         if (
             not o.beneficiary_ref
             or not o.bank
@@ -154,7 +231,10 @@ def issues(o: Order) -> list[str]:
         ):
             errors.append("Unverified beneficiary instructions")
     errors.extend(f"Unresolved: {question}" for question in o.unresolved)
-    if o.kind == "product-image-pi" and any(not i.image for i in o.items):
+    errors.extend(
+        f"Disputed evidence: {e.field}" for e in o.evidence if e.status == "disputed"
+    )
+    if o.kind == "product-image-pi" and any(not item.images() for item in o.items):
         errors.append("Each image PI line requires a product image")
     for line in o.items:
         if not line.unit:

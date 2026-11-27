@@ -7,8 +7,10 @@ from mcp.server.fastmcp import FastMCP
 from .model import Model, Order, Text, Totals, calculate, issues
 from .storage import Snapshot, current, database, home, save, sha
 from .extract import Extraction, Source, Highlight, grounded, populate
-from .approval import Proof, Review, authorize, request
+from .approval import Proof, Review, authorize, basis, request, template_version
 from .render import TITLES, open_template, pdf, workbook
+from .finance import registered
+from .resolution import FieldResolution, resolve
 from .audit import Audit, inspect_files
 
 
@@ -78,11 +80,21 @@ def extract_order_information(
 
 @mcp.tool()
 def update_order_draft(
-    order_id: Id, expected_version: Version, order: Order
+    order_id: Id,
+    expected_version: Version,
+    order: Order | None = None,
+    resolutions: Annotated[list[FieldResolution], Field(min_length=1, max_length=200)]
+    | None = None,
 ) -> Snapshot:
-    """Replace the full order using optimistic concurrency. Every revision voids prior approval."""
+    """Replace an order or propose evidenced field resolutions on its current revision."""
+    if (order is None) == (resolutions is None):
+        raise ValueError("Supply either the full order or field resolutions")
     with database() as db:
-        return save(db, order, order_id, expected_version)
+        previous = current(db, order_id)
+        if previous.version != expected_version:
+            raise ValueError("Stale version")
+        revision = order if order is not None else resolve(previous.order, resolutions)
+        return save(db, revision, order_id, expected_version)
 
 
 @mcp.tool()
@@ -103,7 +115,7 @@ def validate_order(order_id: Id) -> Validation:
     """Report missing fields and commercial inconsistencies."""
     with database() as db:
         o = current(db, order_id).order
-        errors = issues(o)
+        errors = issues(o, registered(db))
         if (
             o.template_id
             and not db.execute(
@@ -150,6 +162,7 @@ def emit(db, snap, preview, rid=None):
         template = None
         o = snap.order
         if o.template_id:
+            template_version(db, o)
             row = db.execute(
                 "SELECT content FROM templates WHERE id=?", (o.template_id,)
             ).fetchone()
@@ -157,9 +170,9 @@ def emit(db, snap, preview, rid=None):
                 raise ValueError("Unknown enterprise template")
             template = row[0]
         title = ("DRAFT - " if preview else "") + TITLES[o.kind]
-        workbook(o, title, x, template)
-        pdf(o, title, p, snap.version)
-        report = inspect_files(o, x, p, title)
+        workbook(o, title, x, template, draft=preview)
+        pdf(o, title, p, snap.version, draft=preview)
+        report = inspect_files(o, x, p, title, draft=preview)
         if not report.passed:
             raise ValueError("Artifact audit failed: " + " | ".join(report.findings))
         db.execute(
@@ -174,6 +187,8 @@ def emit(db, snap, preview, rid=None):
                 sha(p.read_bytes()),
             ),
         )
+        if preview:
+            db.execute("INSERT INTO preview_basis VALUES (?, ?)", (aid, basis()))
         return Artifact(
             artifact_id=aid,
             order_id=snap.order_id,
@@ -190,7 +205,7 @@ def emit(db, snap, preview, rid=None):
 
 @mcp.tool()
 def preview_document(order_id: Id, expected_version: Version) -> Artifact:
-    """Write watermarked files for an order with calculable line amounts."""
+    """Write order previews with explicit Pending values for unknown amounts."""
     with database() as db:
         snap = current(db, order_id)
         if snap.version != expected_version:
@@ -219,7 +234,8 @@ def generate_document(request_id: Id, proof: Proof) -> Artifact:
     with database() as db:
         snap = authorize(db, request_id, proof)
         prior = db.execute(
-            "SELECT id FROM artifacts WHERE request_id=?", (request_id,)
+            "SELECT id FROM artifacts WHERE order_id=? AND version=? AND preview=0 ORDER BY rowid LIMIT 1",
+            (snap.order_id, snap.version),
         ).fetchone()
         if prior:
             artifact = check(db, prior[0])
@@ -247,6 +263,7 @@ def check(db, aid):
             x,
             p,
             ("DRAFT - " if row["preview"] else "") + TITLES[snap.order.kind],
+            draft=bool(row["preview"]),
         )
     return Artifact(
         artifact_id=aid,
