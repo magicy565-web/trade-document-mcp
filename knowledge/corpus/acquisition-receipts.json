@@ -1,0 +1,20 @@
+[
+  {
+    "id": "US-CFR-141",
+    "final_url": "https://www.govinfo.gov/content/pkg/CFR-2025-title19-vol2/xhtml/CFR-2025-title19-vol2-part141.html",
+    "retrieved_at": "2026-11-27T17:37:47.374699+00:00",
+    "bytes": 323806,
+    "sha256": "984f480fb91eaa175f9450f3d1f095d7c5b4681a8ecf6545a9130a8161b5d6eb",
+    "status": "downloaded_review_only",
+    "training_status": "not_approved"
+  },
+  {
+    "id": "GB-HMRC-PI",
+    "final_url": "https://www.gov.uk/hmrc-internal-manuals/vat-trader-records/vatrec9010",
+    "retrieved_at": "2026-11-27T17:37:50.803248+00:00",
+    "bytes": 61039,
+    "sha256": "df9916d465fa5c3c3356596242e630703a77ec26eedde42a7545169b65f623a3",
+    "status": "downloaded_review_only",
+    "training_status": "not_approved"
+  }
+]

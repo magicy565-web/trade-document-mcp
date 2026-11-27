@@ -21,6 +21,11 @@ def sha(data):
 
 def home():
     path = Path(os.environ.get("TRADE_DOC_HOME", ".trade-doc")).resolve()
+    from .access import identity
+
+    principal = identity.get()
+    if principal:
+        path = path / "tenants" / principal.tenant
     path.mkdir(parents=True, exist_ok=True, mode=0o700)
     return path
 
@@ -37,6 +42,13 @@ def database():
           digest TEXT, reviewer TEXT, proof TEXT, created TEXT DEFAULT CURRENT_TIMESTAMP);
         CREATE TABLE IF NOT EXISTS artifacts(id TEXT PRIMARY KEY, order_id TEXT, version INTEGER,
           request_id TEXT, preview INTEGER, workbook TEXT, pdf TEXT);
+        CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY, actor TEXT, tool TEXT,outcome TEXT,created TEXT DEFAULT CURRENT_TIMESTAMP);
+        CREATE TABLE IF NOT EXISTS downloads(id TEXT PRIMARY KEY,path TEXT,digest TEXT,expires INTEGER);
+        CREATE TABLE IF NOT EXISTS idempotency(key TEXT PRIMARY KEY,digest TEXT,id TEXT);
+        CREATE TABLE IF NOT EXISTS reviewed_rules(id TEXT,version INTEGER,digest TEXT,body TEXT,first TEXT,second TEXT,PRIMARY KEY(id,version));
+        CREATE TABLE IF NOT EXISTS preview_rules(artifact TEXT PRIMARY KEY,digest TEXT);
+        CREATE TABLE IF NOT EXISTS shipment_adjustments(reference TEXT PRIMARY KEY,sid TEXT,digest TEXT,body TEXT,proof TEXT);
+        CREATE TABLE IF NOT EXISTS beneficiaries(ref TEXT,version INTEGER,body TEXT,verifier TEXT,authorizer TEXT,PRIMARY KEY(ref,version));
         CREATE TABLE IF NOT EXISTS shipments(id TEXT,ver INTEGER,body TEXT,PRIMARY KEY(id,ver));
         CREATE TABLE IF NOT EXISTS ship_reviews(id TEXT PRIMARY KEY,body TEXT);
         CREATE TABLE IF NOT EXISTS shipment_issues(id TEXT PRIMARY KEY,body TEXT,challenge TEXT,reviewer TEXT,signature TEXT);
@@ -78,12 +90,15 @@ def current(db, oid, version=None):
         if rows["version"] < latest
         else {None: "draft", 0: "awaiting_review", 1: "issued"}[state]
     )
+    order = Order.model_validate_json(rows["body"])
+    if sha(rows["body"].encode()) != rows["digest"]:
+        raise ValueError("Stored revision digest mismatch")
     return Snapshot(
         order_id=oid,
         version=rows["version"],
-        digest=rows["digest"],
+        digest=sha(canonical(order.model_dump(mode="json"))),
         approval_status=status,
-        order=Order.model_validate_json(rows["body"]),
+        order=order,
     )
 
 

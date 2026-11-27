@@ -30,3 +30,13 @@ Two pairs at USD 15.25 and one pair at USD 18.00 give USD 48.50 in goods. Adding
 ## Executable check
 
 From the installed repository run `python -m pytest -q tests/test_rules.py::test_rounding_and_fees`. Use the fictional order in `fixtures/sample.json` for practice.
+
+## International and enterprise workflow
+
+Use an agreed term with its place and edition, typed party roles, verified payment beneficiary and exact installment percentages. Compare calculated installments with the total and review both preview hashes before signature.
+
+## Counterexample
+
+12.5 square metres are valid. A copied carton count does not establish the measured area.
+
+Run `python -m pytest -q tests/test_commercial.py` to exercise this workflow.

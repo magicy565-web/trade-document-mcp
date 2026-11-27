@@ -4,13 +4,17 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "trade-document-mcp"
-version = "0.1.0"
+version = "0.5.0.dev1"
 requires-python = ">=3.11"
-dependencies = ["mcp>=1.29,<2","pydantic>=2.11,<3","openpyxl>=3.1,<4","reportlab>=4.4,<5","pypdf>=6,<7","cryptography>=42","Pillow>=10","defusedxml>=0.7"]
+dependencies = ["iso4217>=1.16,<2","iso3166>=2,<4","mcp>=1.29,<2","pydantic>=2.11,<3","openpyxl>=3.1,<4","reportlab>=4.4,<5","pypdf>=6,<7","cryptography>=42","Pillow>=10","defusedxml>=0.7"]
 [project.optional-dependencies]
+s3 = ["boto3>=1.36,<2"]
 test = ["pytest>=8,<10"]
 [project.scripts]
 trade-doc-mcp = "trade_document.server:main"
+trade-doc-store = "trade_document.operations:main"
+trade-doc-sign = "trade_document.signing:main"
+trade-doc-http = "trade_document.remote:main"
 trade-doc-review = "trade_document.review:main"
 [tool.setuptools]
 packages = ["trade_document", "trade_knowledge"]

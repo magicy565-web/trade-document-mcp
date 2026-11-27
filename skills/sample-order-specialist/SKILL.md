@@ -30,3 +30,13 @@ A free pair with USD 12 agreed freight produces a USD 12 total and retains the n
 ## Executable check
 
 From the installed repository run `python -m pytest -q tests/test_rules.py::test_free_still_pays_shipping`. Use the fictional order in `fixtures/sample.json` for practice.
+
+## International and enterprise workflow
+
+Capture sample policy, one-time tooling, future-credit condition and acceptance criteria separately. Record a split dispatch as a shipment against the signed PI; confirm allocations for that batch.
+
+## Counterexample
+
+A freight-only free sample can have a positive customs valuation. Never carry a zero commercial price into a declaration automatically.
+
+Run `python -m pytest -q tests/test_shipments.py` to exercise this workflow.

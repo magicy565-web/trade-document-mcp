@@ -30,3 +30,13 @@ When translation changes the strength of a commitment, present both readings to 
 ## Executable check
 
 From the installed repository run `python -m pytest -q tests/test_rules.py::test_grounded_chat_into_draft`. Use the fictional order in `fixtures/sample.json` for practice.
+
+## International and enterprise workflow
+
+Select English, German or French labels independently of business wording. Preserve the approved original commitment or its human-reviewed translation. Resolve narrative highlights against the original named source and mark disputes explicitly.
+
+## Counterexample
+
+A translated document heading does not establish a German or French delivery promise. Never promote an unaccepted buyer proposal to a confirmed concession.
+
+Run `python -m pytest -q tests/test_commercial.py` to exercise this workflow.

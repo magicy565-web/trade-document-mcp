@@ -1,6 +1,5 @@
+from .access import registry
 import base64
-import json
-import os
 import time
 from uuid import uuid4
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
@@ -30,9 +29,20 @@ class Proof(Model):
 
 
 def request(db, snap):
-    errors = issues(snap.order)
+    from .beneficiaries import verified
+    from .rules import evaluate
+
+    rules, regional = evaluate(db, snap.order)
+    errors = issues(snap.order, verified(db)) + [f.resolution for f in regional]
     if errors:
         raise ValueError(" | ".join(errors))
+    duplicate = db.execute(
+        """SELECT 1 FROM artifacts a JOIN versions v ON a.order_id=v.id AND a.version=v.version
+        WHERE a.preview=0 AND a.order_id<>? AND json_extract(v.body,'$.kind')=? AND json_extract(v.body,'$.number')=?""",
+        (snap.order_id, snap.order.kind, snap.order.number),
+    ).fetchone()
+    if duplicate:
+        raise ValueError("Document number already issued")
     rid = uuid4().hex
     db.execute(
         "INSERT INTO requests(id,order_id,version,digest) VALUES(?,?,?,?)",
@@ -44,12 +54,17 @@ def request(db, snap):
     ).fetchone()
     if not row:
         raise ValueError("Preview required")
+    preview_rules = db.execute(
+        "SELECT digest FROM preview_rules WHERE artifact=?", (row["id"],)
+    ).fetchone()
+    if not preview_rules or preview_rules[0] != rules:
+        raise ValueError("Rules changed; preview again")
     binding = Binding(
         preview_id=row["id"],
         workbook=row["workbook"],
         pdf=row["pdf"],
         template=snap.order.template_id or "builtin-v2/" + snap.order.kind,
-        rules="commercial-v2",
+        rules=rules,
         expires=int(time.time()) + 3600,
     )
     db.execute("INSERT INTO bindings VALUES(?,?)", (rid, binding.model_dump_json()))
@@ -82,10 +97,15 @@ def authorize(db, rid, proof):
     if not record:
         raise ValueError("Legacy approval requires new preview and review")
     binding = Binding.model_validate_json(record[0])
+    from .beneficiaries import verified
+    from .rules import evaluate
+
+    rules, regional = evaluate(db, snap.order)
     if (
-        binding.expires <= time.time()
-        or binding.rules != "commercial-v2"
-        or issues(snap.order)
+        regional
+        or binding.expires <= time.time()
+        or binding.rules != rules
+        or issues(snap.order, verified(db))
     ):
         raise ValueError("Expired or invalid approval")
     root = home() / "artifacts" / binding.preview_id
@@ -96,7 +116,7 @@ def authorize(db, rid, proof):
         path = root / name
         if not path.is_file() or sha(path.read_bytes()) != digest:
             raise ValueError("Preview changed")
-    key = json.loads(os.environ.get("TRADE_DOC_REVIEWERS", "{}")).get(proof.reviewer)
+    key = registry("TRADE_DOC_REVIEWERS").get(proof.reviewer)
     if not key:
         raise ValueError("Unregistered reviewer")
     try:

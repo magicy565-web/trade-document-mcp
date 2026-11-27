@@ -100,3 +100,15 @@ def test_text_stays_literal(order):
     s = api.create_order_draft(order)
     a = api.preview_document(s.order_id, 1)
     assert load_workbook(a.xlsx_path).active["B3"].data_type == "s"
+
+
+def test_multiview_product_sheet(order):
+    buf = BytesIO()
+    Image.new("RGB", (64, 40), "blue").save(buf, format="PNG")
+    raw = base64.b64encode(buf.getvalue()).decode()
+    order.items[0].images = [raw, raw]
+    order.buyer = "東京商事 Example"
+    s = api.create_order_draft(order)
+    result = api.preview_document(s.order_id, 1)
+    assert result.audit.passed
+    assert len(load_workbook(result.xlsx_path).active._images) == 2

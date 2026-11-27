@@ -1,3 +1,5 @@
+from .types import Country, Currency
+
 """Actual dispatched quantities and box contents drive both shipping documents."""
 
 import time, shutil
@@ -31,7 +33,7 @@ class PackedLine(Model):
     sku: Text
     quantity: Qty
     unit: Text
-    origin: Annotated[str, Field(pattern="^[A-Z]{2}$")]
+    origin: Country
 
 
 class Box(Model):
@@ -130,6 +132,12 @@ def persist(db, oid, order_version, shipment, sid, rev):
         if b.net_kg > b.gross_kg:
             raise ValueError("Gross weight below net weight")
         for l in b.contents:
+            if (
+                l.sku in catalog
+                and catalog[l.sku].origin
+                and catalog[l.sku].origin != l.origin
+            ):
+                raise ValueError("Shipment origin conflicts with order evidence")
             if l.sku not in catalog or l.unit != catalog[l.sku].unit:
                 raise ValueError("SKU or unit mismatch")
     qty = quantities(shipment)
@@ -141,7 +149,7 @@ def persist(db, oid, order_version, shipment, sid, rev):
         if other.shipment.number == shipment.number:
             raise ValueError("Duplicate shipment number")
         if other.order_id == oid:
-            for sku, q in quantities(other.shipment).items():
+            for sku, q in reserved(db, other).items():
                 qty[sku] += q
     if any(sku not in catalog or q > catalog[sku].quantity for sku, q in qty.items()):
         raise ValueError("Exceeds remaining ordered quantity")
@@ -176,6 +184,8 @@ def revise_shipment(
 ) -> Saved:
     with database() as db:
         old = load(db, shipment_id)
+        if any(a.action == "cancel_draft" for a in adjustments(db, shipment_id)):
+            raise ValueError("Cancelled shipment")
         if (
             old.version != expected_version
             or db.execute(
@@ -199,6 +209,9 @@ def validate_shipment(shipment_id: Id, version: Rev) -> Check:
         ok = (
             current(db, s.order_id).version == s.order_version
             and load(db, shipment_id).version == version
+            and not any(
+                a.action == "cancel_draft" for a in adjustments(db, shipment_id)
+            )
         )
         return Check(valid=ok, findings=[] if ok else ["Source revision superseded"])
 
@@ -213,6 +226,17 @@ def tables(s, o):
         ["Buyer", o.buyer],
         ["Consignee", batch.consignee],
     ]
+    base.extend(
+        [
+            [k, v]
+            for k, v in [
+                ("Seller address", o.seller_address),
+                ("Buyer address", o.buyer_address),
+                ("Purchase order", o.purchase_order),
+            ]
+            if v
+        ]
+    )
     amounts = [["SKU", "Description", "Quantity", "Unit", "Unit price", "Amount"]]
     catalog = {i.sku: i for i in o.items}
     for sku, q in quantities(batch).items():
@@ -246,8 +270,20 @@ def tables(s, o):
             sum(b.volume_m3 for b in batch.boxes),
         ]
     )
+    origins = defaultdict(Decimal)
+    for box in batch.boxes:
+        for line in box.contents:
+            origins[(line.sku, line.origin, line.unit)] += line.quantity
+    origin_table = [["SKU", "Origin", "Quantity", "Unit"]] + [
+        [sku, country, qty, unit] for (sku, country, unit), qty in origins.items()
+    ]
+    commercial = base + [
+        ["Currency", o.currency],
+        ["Payment terms", o.payment],
+        ["Delivery terms", o.delivery],
+    ]
     return {
-        "commercial-invoice": [base, amounts, totals],
+        "commercial-invoice": [commercial, amounts, totals, origin_table],
         "packing-list": [base, packs, weights],
     }
 
@@ -324,6 +360,10 @@ def render(root, s, o, preview):
                         raise ValueError("PDF row mismatch")
                     cursor = found + len(token)
             files.extend([x, p])
+        if not preview:
+            from .objects import archive
+
+            archive(files)
         return Bundle(
             shipment_id=s.shipment_id,
             version=s.version,
@@ -338,6 +378,8 @@ def render(root, s, o, preview):
 def preview_shipment(shipment_id: Id, expected_version: Rev) -> Packet:
     with database() as db:
         s = load(db, shipment_id)
+        if any(a.action == "cancel_draft" for a in adjustments(db, shipment_id)):
+            raise ValueError("Cancelled shipment")
         snap = current(db, s.order_id)
         if s.version != expected_version or s.order_version != snap.version:
             raise ValueError("Stale shipment")
@@ -371,6 +413,8 @@ def export_document_bundle(packet: Packet, proof: Proof) -> Bundle:
             raise ValueError("Unknown or expired shipping review")
         verify("TRADE_DOC_REVIEWERS", packet.model_dump(mode="json"), proof)
         s = load(db, packet.shipment_id)
+        if any(a.action == "cancel_draft" for a in adjustments(db, s.shipment_id)):
+            raise ValueError("Cancelled shipment")
         snap = current(db, s.order_id)
         if (
             s.version != packet.version
@@ -429,13 +473,24 @@ def cross_check_documents(shipment_id: Id, version: Rev) -> Check:
         )
 
 
+class CustomsDraft(Draft):
+    shipment: Saved
+    commercial_currency: Currency
+    classification_candidates: dict[Text, Text]
+    reason_for_export: Text | None
+    valuation_basis: Text | None
+
+
 def prepare_customs_support(
     shipment_id: Id,
     version: Rev,
     valuation: Amount | None = None,
-    valuation_currency: Text | None = None,
+    valuation_currency: Currency | None = None,
     valuation_evidence: Text | None = None,
-) -> Draft:
+    valuation_basis: Text | None = None,
+    reason_for_export: Text | None = None,
+    classification_candidates: dict[Text, Text] | None = None,
+) -> CustomsDraft:
     with database() as db:
         s = load(db, shipment_id, version)
         fields = {
@@ -443,13 +498,23 @@ def prepare_customs_support(
             "consignee": s.shipment.consignee,
             "source": s.shipment.source,
         }
+        candidates = classification_candidates or {}
+        if set(candidates) - set(quantities(s.shipment)):
+            raise ValueError("Classification candidate for unshipped SKU")
         supplied = {
+            "reason_for_export": reason_for_export,
+            "valuation_basis": valuation_basis,
             "valuation": valuation,
             "valuation_currency": valuation_currency,
             "valuation_evidence": valuation_evidence,
         }
         fields.update({k: str(v) for k, v in supplied.items() if v})
-        return Draft(
+        return CustomsDraft(
+            shipment=s,
+            commercial_currency=current(db, s.order_id, s.order_version).order.currency,
+            reason_for_export=reason_for_export,
+            valuation_basis=valuation_basis,
+            classification_candidates=candidates,
             title="Customs supporting worksheet",
             fields=fields,
             missing=[k for k, v in supplied.items() if not v],
@@ -531,3 +596,118 @@ def draft_shipping_instruction(
             shipment=load(db, shipment_id, version),
             required_review=fields[purpose],
         )
+
+
+class Adjustment(Model):
+    purpose: Literal["shipment.adjustment.v1"] = "shipment.adjustment.v1"
+    shipment_id: Id
+    version: Rev
+    revision_digest: Text
+    reference: Text
+    reason: Text
+    action: Literal["cancel_draft", "received_return"]
+    quantities: dict[Text, Qty] = Field(default_factory=dict)
+
+
+class AdjustmentReceipt(Model):
+    digest: str
+    reference: str
+
+
+def adjustments(db, sid):
+    return [
+        Adjustment.model_validate_json(row[0])
+        for row in db.execute(
+            "SELECT body FROM shipment_adjustments WHERE sid=?", (sid,)
+        )
+    ]
+
+
+def reserved(db, saved):
+    qty = quantities(saved.shipment)
+    for a in adjustments(db, saved.shipment_id):
+        if a.action == "cancel_draft":
+            return {}
+        for sku, q in a.quantities.items():
+            qty[sku] -= q
+    return qty
+
+
+def adjust_shipment(adjustment: Adjustment, proof: Proof) -> AdjustmentReceipt:
+    verify("TRADE_DOC_REVIEWERS", adjustment.model_dump(mode="json"), proof)
+    digest = sha(canonical(adjustment.model_dump(mode="json")))
+    with database() as db:
+        s = load(db, adjustment.shipment_id)
+        if s.version != adjustment.version or s.digest != adjustment.revision_digest:
+            raise ValueError("Stale adjustment")
+        prior = db.execute(
+            "SELECT digest FROM shipment_adjustments WHERE reference=?",
+            (adjustment.reference,),
+        ).fetchone()
+        if prior:
+            if prior[0] != digest:
+                raise ValueError("Adjustment reference already used")
+        else:
+            released = db.execute(
+                "SELECT 1 FROM shipment_issues WHERE id=?", (s.shipment_id,)
+            ).fetchone()
+            available = reserved(db, s)
+            if adjustment.action == "cancel_draft":
+                if released or not available or adjustment.quantities:
+                    raise ValueError(
+                        "Only an active unissued batch can be cancelled in full"
+                    )
+            elif (
+                not released
+                or not adjustment.quantities
+                or any(
+                    q > available.get(k, 0) for k, q in adjustment.quantities.items()
+                )
+            ):
+                raise ValueError("Return exceeds net dispatched quantity")
+            db.execute(
+                "INSERT INTO shipment_adjustments VALUES(?,?,?,?,?)",
+                (
+                    adjustment.reference,
+                    s.shipment_id,
+                    digest,
+                    adjustment.model_dump_json(),
+                    proof.model_dump_json(),
+                ),
+            )
+    return AdjustmentReceipt(digest=digest, reference=adjustment.reference)
+
+
+class CreditTerms(Model):
+    reference: Text
+    currency: Currency
+    maximum_amount: Amount
+    latest_shipment: date
+    consignee: Text
+    required_documents: list[Text]
+
+
+def check_credit_terms(shipment_id: Id, version: Rev, terms: CreditTerms) -> Check:
+    """Basic discrepancy checklist for the human document examiner."""
+    with database() as db:
+        s = load(db, shipment_id, version)
+        o = current(db, s.order_id, s.order_version).order
+        findings = []
+        if terms.currency != o.currency:
+            findings.append("Currency differs; no FX applied")
+        elif s.payable > terms.maximum_amount:
+            findings.append("Shipment exceeds credit amount")
+        if s.shipment.dispatch_date > terms.latest_shipment:
+            findings.append("Dispatch after latest shipment date")
+        if s.shipment.consignee != terms.consignee:
+            findings.append("Consignee mismatch")
+        issued = db.execute(
+            "SELECT 1 FROM shipment_issues WHERE id=?", (shipment_id,)
+        ).fetchone()
+        available = {"commercial invoice", "packing list"} if issued else set()
+        findings.extend(
+            "Obtain " + doc
+            for doc in terms.required_documents
+            if doc.casefold() not in available
+        )
+        return Check(valid=not findings, findings=findings)
