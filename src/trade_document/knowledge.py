@@ -1,3 +1,5 @@
+from .types import Country, Currency
+
 """Versioned evidence lookup. Registry notes are advisory until independently approved."""
 
 import json
@@ -56,12 +58,12 @@ def search(query: Text) -> Results:
 
 
 class Context(Model):
-    destination: Annotated[str, Field(pattern="^[A-Z]{2}$")]
+    destination: Country
     purpose: Literal[
         "commercial_pi", "sample_pi", "customs_support", "customs_substitute"
     ] = "commercial_pi"
     declared_value: Annotated[Decimal, Field(gt=0)] | None = None
-    valuation_currency: str | None = None
+    valuation_currency: Currency | None = None
     valuation_evidence: Text | None = None
 
 

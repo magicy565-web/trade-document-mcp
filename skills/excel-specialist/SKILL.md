@@ -30,3 +30,13 @@ A2, A4 and A20 in an empty six-column workbook map the title, party details and 
 ## Executable check
 
 From the installed repository run `python -m pytest -q tests/test_artifacts.py::test_enterprise_layout`. Use the fictional order in `fixtures/sample.json` for practice.
+
+## International and enterprise workflow
+
+Inspect sheet shapes, merges, images, formulas, styles, names and print area. Propose section rows, obtain template reviewer signature, then retain the immutable original and mapping. The reviewed template family allows static brand rows above the title and static appendix sheets; Calc prints the actual workbook.
+
+## Counterexample
+
+A workbook with an unmapped formula or edited source hash requires a new mapping review. Restore an earlier version by selecting its stored template ID on a new order revision.
+
+Run `python -m pytest -q tests/test_mapping.py` to exercise this workflow.

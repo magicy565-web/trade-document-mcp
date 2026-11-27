@@ -35,3 +35,7 @@ python tools/demo.py /tmp/trade-doc-examples
 ```
 
 The demo uses an ephemeral fixture signer and produces editable sample PI and sample order workbooks and PDFs. It reads only the checked-in fictional fixture. All artifacts stay outside git. The cohort evaluation includes incomplete and conflicting intakes in its denominator. It uses simulated reviewer signatures. Real first-pass acceptance, field accuracy and workload require independent professional adjudication.
+
+## Development candidate through V0.5
+
+See [enterprise deployment and signing](docs/enterprise.md) for authenticated HTTP, tenant isolation, ERP idempotency, signed template/rule review, shipping documents, backups and limitations. The five-stage [acceptance roadmap](docs/roadmap-v0.5.md) tracks requirements separately from the [engineering verification record](docs/verification-v05.md). Use the locked dependency install in the enterprise guide to reproduce CI.

@@ -1,6 +1,8 @@
+from .access import registry
+
 """Inspect company layouts, sign a mapping, retain the exact original for review."""
 
-import base64, json, os
+import base64
 from io import BytesIO
 from zipfile import ZipFile
 from typing import Annotated, Literal
@@ -118,7 +120,7 @@ def propose_template_mapping(xlsx_base64: Payload) -> Mapping:
 
 
 def verify(keyring, value, proof):
-    keys = json.loads(os.environ.get(keyring, "{}"))
+    keys = registry(keyring)
     if proof.reviewer not in keys:
         raise ValueError("Reviewer role required")
     try:
@@ -136,7 +138,7 @@ def confirm_template_mapping(
     if sha(data) != mapping.digest:
         raise ValueError("Template changed after mapping")
     verify("TRADE_TEMPLATE_REVIEWERS", mapping.model_dump(mode="json"), proof)
-    if len(wb.worksheets) != 1 or wb.active.title != mapping.sheet or wb.defined_names:
+    if wb.active.title != mapping.sheet or wb.defined_names:
         raise ValueError(
             "Single-sheet layout required; named areas require explicit migration"
         )
@@ -149,7 +151,7 @@ def confirm_template_mapping(
     buf = BytesIO()
     wb.save(buf)
     normalized = buf.getvalue()
-    open_template(normalized)
+    open_template(normalized, enterprise=True)
     key = sha(canonical(mapping.model_dump(mode="json")))
     with database() as db:
         db.execute(
@@ -169,5 +171,8 @@ def validate_template(template_id: Text) -> Check:
         ).fetchone()
         if not row:
             return Check(valid=False, findings=["Unknown template"])
-        open_template(row[0])
+        reviewed = db.execute(
+            "SELECT 1 FROM template_reviews WHERE id=?", (template_id,)
+        ).fetchone()
+        open_template(row[0], enterprise=bool(reviewed))
         return Check(valid=True, findings=[])

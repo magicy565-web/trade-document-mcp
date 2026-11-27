@@ -26,7 +26,7 @@ def main():
         for number in range(100):
             o = Order.model_validate_json(FIXTURE.read_bytes())
             o.number = f"QA-{number:03}"
-            o.items[0].quantity = number + 1
+            o.items[0].quantity = Decimal(number + 1)
             o.kind = ("sample-pi", "sample-order")[number % 2]
             scenario = number % 10
             ready = scenario < 7

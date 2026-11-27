@@ -23,6 +23,8 @@ from reportlab.platypus import (
     Image,
 )
 
+from .locale import label as localize
+from .types import minor_units
 from .model import calculate
 
 TITLES = {
@@ -63,12 +65,39 @@ def extra_details(o):
         ("PO reference", o.purchase_order),
         ("Valid until", o.valid_until),
     ]
+    fields.extend(
+        (p.role.replace("_", " ").title() + " profile", p.display()) for p in o.parties
+    )
+    fields.append(("Acceptance criteria", o.acceptance_criteria))
+    if o.trade_term:
+        fields.append(
+            (
+                "Trade term",
+                " ".join([o.trade_term.term, o.trade_term.place, o.trade_term.edition]),
+            )
+        )
     if o.schedule:
         fields.extend(
             (m.event + " (" + str(m.percent) + "%)", f"{o.currency} {amount}")
             for m, amount in zip(o.schedule, calculate(o).installments)
         )
     return [(k, str(v)) for k, v in fields if v is not None]
+
+
+def charges(o):
+    rows = [("Sample fee", o.sample_fee), ("Freight", o.freight)]
+    rows.extend(
+        (k, v)
+        for k, v in [("Insurance", o.insurance), ("Tooling fee", o.tooling_fee)]
+        if v is not None
+    )
+    return rows + [("Discount", o.discount)]
+
+
+def document_title(o, preview):
+    return (localize(o, "DRAFT") + " - " if preview else "") + localize(
+        o, TITLES[o.kind]
+    )
 
 
 def picture(raw):
@@ -82,7 +111,7 @@ def picture(raw):
     return buf.getvalue()
 
 
-def open_template(data):
+def open_template(data, enterprise=False):
     with ZipFile(BytesIO(data)) as archive:
         if sum(f.file_size for f in archive.infolist()) > 4000000:
             raise ValueError("Template exceeds size limit")
@@ -100,8 +129,25 @@ def open_template(data):
                 raise ValueError("Template must be a standalone workbook")
     wb = load_workbook(BytesIO(data), keep_links=False)
     ws = wb.active
-    if len(wb.worksheets) != 1 or ws.max_row > 80 or ws.max_column > 6:
+    if wb.defined_names or ws != wb.worksheets[0]:
+        raise ValueError("Unsupported defined name or active sheet")
+    if enterprise:
+        for appendix in wb.worksheets[1:]:
+            if (
+                appendix.max_row > 500
+                or appendix.max_column > 48
+                or appendix.sheet_state != "visible"
+            ):
+                raise ValueError("Unsupported appendix size or visibility")
+            if any(c.data_type == "f" or c.hyperlink for row in appendix for c in row):
+                raise ValueError("Only static appendix cells supported")
+    if (
+        (len(wb.worksheets) != 1 and not enterprise)
+        or ws.max_row > 80
+        or ws.max_column > 6
+    ):
         raise ValueError("Expected one six-column template sheet, at most 80 rows")
+    fixed = []
     found = {}
     for row in ws.iter_rows():
         for c in row:
@@ -113,6 +159,8 @@ def open_template(data):
                 if c.column != 1 or c.value in found:
                     raise ValueError("Each section anchor belongs in column A once")
                 found[c.value] = c.row
+            elif c.value is not None and enterprise:
+                fixed.append(c)
             elif c.value is not None:
                 raise ValueError(
                     "Template accepts layout/styles and three section anchors"
@@ -120,7 +168,13 @@ def open_template(data):
     if set(found) != {"{{title}}", "{{details}}", "{{items}}"}:
         raise ValueError("Missing title/details/items anchors")
     a, b, c = (found[k] for k in ("{{title}}", "{{details}}", "{{items}}"))
-    if not a < b or c < b + len(LABELS) or ws.merged_cells.ranges:
+    if any(cell.row >= a for cell in fixed):
+        raise ValueError("Static content overlaps generated area")
+    if (
+        not a < b
+        or c < b + len(LABELS)
+        or any(not enterprise or area.max_row >= a for area in ws.merged_cells.ranges)
+    ):
         raise ValueError(
             "Reserve twelve metadata rows before items; merges are generated"
         )
@@ -156,12 +210,13 @@ def cached_formulas(path, cache):
     path.write_bytes(out.getvalue())
 
 
-def workbook(o, title, path, template=None):
+def workbook(o, title, path, template=None, enterprise=False):
     wb, (top, meta, header) = (
-        open_template(template) if template else (Workbook(), (1, 3, 16))
+        open_template(template, enterprise) if template else (Workbook(), (1, 3, 16))
     )
     ws = wb.active
-    ws.title = "Document"
+    if not enterprise:
+        ws.title = "Document"
     widths = [20, 42, 14, 13, 18, 19]
     for col, width in enumerate(widths, 1):
         ws.column_dimensions[get_column_letter(col)].width = width
@@ -179,10 +234,26 @@ def workbook(o, title, path, template=None):
 
     band(top, [title])
 
-    def add_image(raw, cell):
+    def add_image(raw, cell, offset=0):
         img = XLImage(BytesIO(picture(raw)))
         scale = min(90 / img.width, 42 / img.height)
         img.width, img.height = img.width * scale, img.height * scale
+        if offset:
+            from openpyxl.drawing.spreadsheet_drawing import OneCellAnchor, AnchorMarker
+            from openpyxl.drawing.xdr import XDRPositiveSize2D
+            from openpyxl.utils.units import pixels_to_EMU
+
+            anchor = ws[cell]
+            cell = OneCellAnchor(
+                _from=AnchorMarker(
+                    col=anchor.column - 1,
+                    row=anchor.row - 1,
+                    colOff=pixels_to_EMU(offset),
+                ),
+                ext=XDRPositiveSize2D(
+                    pixels_to_EMU(img.width), pixels_to_EMU(img.height)
+                ),
+            )
         ws.add_image(img, cell)
 
     if o.logo:
@@ -200,8 +271,8 @@ def workbook(o, title, path, template=None):
         ):
             ws.row_dimensions[n].hidden = True
             continue
-        value = str(raw or "Pending")
-        literal(ws.cell(n, 1), label)
+        value = str(raw or localize(o, "Pending"))
+        literal(ws.cell(n, 1), localize(o, label))
         literal(ws.cell(n, 2), value)
         ws.cell(n, 2).alignment = Alignment(wrap_text=True, vertical="center")
         ws.cell(n, 1).alignment = Alignment(wrap_text=True, vertical="center")
@@ -211,16 +282,16 @@ def workbook(o, title, path, template=None):
     extra = extra_details(o)
     for label, value in extra:
         ws.insert_rows(header)
-        literal(ws.cell(header, 1), label)
+        literal(ws.cell(header, 1), localize(o, label))
         ws.merge_cells(start_row=header, start_column=2, end_row=header, end_column=6)
         literal(ws.cell(header, 2), value)
         ws.cell(header, 2).alignment = Alignment(wrap_text=True)
         ws.row_dimensions[header].height = max(24, 16 * math.ceil(len(value) / 70))
         header += 1
-    band(header, HEAD)
+    band(header, [localize(o, k) for k in HEAD])
     cache = {}
     amounts = calculate(o)
-    precision = 0 if o.currency == "JPY" else 2
+    precision = minor_units(o.currency)
     for index, item in enumerate(o.items, 1):
         row = header + index
         desc = "\n".join(filter(None, [item.description, item.specification]))
@@ -237,39 +308,43 @@ def workbook(o, title, path, template=None):
             17 * math.ceil(len(item.sku) / 15),
             17 * math.ceil(len(item.unit) / 10),
         )
-        if item.image:
-            add_image(item.image, f"B{row}")
+        photos = ([item.image] if item.image else []) + item.images
+        if photos:
+            for idx, raw in enumerate(photos):
+                add_image(raw, f"B{row}", idx * 95)
             ws.cell(row, 2).alignment = Alignment(wrap_text=True, vertical="bottom")
             ws.row_dimensions[row].height += 38
     end = header + len(o.items)
-    for offset, (label, value) in enumerate(
-        [
-            ("Subtotal", f"=SUM(F{header + 1}:F{end})"),
-            ("Sample fee", o.sample_fee),
-            ("Freight", o.freight),
-            ("Discount", o.discount),
-            ("Total " + o.currency, f"=F{end + 1}+F{end + 2}+F{end + 3}-F{end + 4}"),
-        ],
-        1,
-    ):
-        ws.cell(end + offset, 5, label)
+    rows = [("Subtotal", f"=SUM(F{header + 1}:F{end})"), *charges(o)]
+    final = end + len(rows) + 1
+    rows.append(("Total", f"=SUM(F{end + 1}:F{final - 2})-F{final - 1}"))
+    for offset, (label, value) in enumerate(rows, 1):
+        ws.cell(
+            end + offset,
+            5,
+            localize(o, label) + (" " + o.currency if label == "Total" else ""),
+        )
         ws.cell(end + offset, 6, value)
     cache[f"F{end + 1}"] = amounts.subtotal
-    cache[f"F{end + 5}"] = amounts.total
-    for r in range(header + 1, end + 6):
-        ws.cell(r, 6).number_format = "#,##0" if precision == 0 else "#,##0.00"
+    cache[f"F{final}"] = amounts.total
+    for r in range(header + 1, final + 1):
+        ws.cell(r, 6).number_format = "#,##0" + (
+            "." + "0" * precision if precision else ""
+        )
     for col in (5, 6):
-        cell = ws.cell(end + 5, col)
+        cell = ws.cell(final, col)
         cell.font = Font(name="Calibri", size=13, bold=True, color="FFFFFF")
         cell.fill = PatternFill("solid", fgColor="184553")
-    ws.row_dimensions[end + 5].height = 25
+    ws.row_dimensions[final].height = 25
+    ws.cell(final + 2, 1, localize(o, "Authorized signature"))
+    ws.oddFooter.right.text = localize(o, "Page") + " &P"
     for r in range(header + 1, end + 1):
         ws.cell(r, 5).number_format = "#,##0.00##" if precision else "#,##0.####"
         ws.cell(r, 6).alignment = Alignment(vertical="center", horizontal="right")
         if (r - header) % 2 == 1:
             for cell in ws[r][:6]:
                 cell.fill = PatternFill("solid", fgColor="EFF5F5")
-    ws.print_area = f"A{top}:F{end + 5}"
+    ws.print_area = f"A{1 if enterprise else top}:F{final + 2}"
     ws.print_title_rows = f"{header}:{header}"
     ws.sheet_view.showGridLines = False
     ws.freeze_panes = f"C{header + 1}"
@@ -293,7 +368,21 @@ def pdf(o, title, path, version):
     )
 
     def para(text, style=body):
-        return Paragraph(escape(str(text)).replace("\n", "<br/>"), style)
+        import re
+
+        value = escape(str(text)).replace("\n", "<br/>")
+        if re.search(r"[\u3040-\u30ff\u3400-\u9fff]", value):
+            from reportlab.pdfbase import pdfmetrics
+            from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+
+            if "HeiseiMin-W3" not in pdfmetrics.getRegisteredFontNames():
+                pdfmetrics.registerFont(UnicodeCIDFont("HeiseiMin-W3"))
+            value = re.sub(
+                r"([\u3040-\u30ff\u3400-\u9fff]+)",
+                r'<font name="HeiseiMin-W3">\1</font>',
+                value,
+            )
+        return Paragraph(value, style)
 
     def photo(raw):
         im = Image(BytesIO(picture(raw)))
@@ -304,13 +393,13 @@ def pdf(o, title, path, version):
     if o.logo:
         story.append(photo(o.logo))
     details = [
-        [para(label), para(getattr(o, k) or "Pending")]
+        [para(localize(o, label)), para(getattr(o, k) or localize(o, "Pending"))]
         for k, label in LABELS.items()
         if getattr(o, k) is not None
         or (k not in {"bank", "sample_policy", "sample_credit", "customization"})
     ]
 
-    details.extend([para(k), para(v)] for k, v in extra_details(o))
+    details.extend([para(localize(o, k)), para(v)] for k, v in extra_details(o))
 
     def table(rows, widths, head=False):
         t = Table(rows, colWidths=widths, repeatRows=int(head), hAlign="LEFT")
@@ -336,13 +425,13 @@ def pdf(o, title, path, version):
 
     story.extend([table(details, [125, 376]), Spacer(1, 14)])
     totals = calculate(o)
-    rows = [HEAD]
+    rows = [[localize(o, k) for k in HEAD]]
     for i, amt in zip(o.items, totals.lines):
         desc = [para(i.description)]
         if i.specification:
             desc.append(para(i.specification))
-        if i.image:
-            desc.append(photo(i.image))
+        for raw in ([i.image] if i.image else []) + i.images:
+            desc.append(photo(raw))
         rows.append(
             [
                 para(i.sku),
@@ -361,11 +450,9 @@ def pdf(o, title, path, version):
                 [
                     [para(k), para(v)]
                     for k, v in [
-                        ("Subtotal", totals.subtotal),
-                        ("Sample fee", o.sample_fee),
-                        ("Freight", o.freight),
-                        ("Discount", o.discount),
-                        ("Total " + o.currency, totals.total),
+                        (localize(o, "Subtotal"), totals.subtotal),
+                        *((localize(o, k), v) for k, v in charges(o)),
+                        (localize(o, "Total") + " " + o.currency, totals.total),
                     ]
                 ],
                 [360, 141],
@@ -373,10 +460,19 @@ def pdf(o, title, path, version):
         ]
     )
 
+    story.extend(
+        [
+            Spacer(1, 14),
+            para(localize(o, "Authorized signature") + " ____________________"),
+        ]
+    )
+
     def footer(canvas, doc):
         canvas.setFont("Helvetica", 8)
         canvas.drawString(17 * mm, 12 * mm, f"{title}  /  Revision {version}")
-        canvas.drawRightString(A4[0] - 17 * mm, 12 * mm, f"Page {doc.page}")
+        canvas.drawRightString(
+            A4[0] - 17 * mm, 12 * mm, f"{localize(o, 'Page')} {doc.page}"
+        )
 
     SimpleDocTemplate(
         str(path),

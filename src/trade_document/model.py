@@ -1,29 +1,26 @@
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Annotated, Literal
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import Field
 
-Text = Annotated[
-    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=400)
-]
+from .types import Model, Text, Currency, Country, minor_units
+from .trade_fields import Party
+
 Amount = Annotated[Decimal, Field(ge=0, max_digits=12, decimal_places=4)]
 Kind = Literal["standard-pi", "product-image-pi", "sample-pi", "sample-order"]
-Currency = Literal[
-    "USD", "EUR", "GBP", "CNY", "JPY", "AUD", "CAD", "AED", "INR", "TRY", "MAD", "CHF"
-]
-
-
-class Model(BaseModel):
-    model_config = ConfigDict(extra="forbid")
 
 
 class Line(Model):
     sku: Text
     description: Text
+    origin: Country | None = None
     specification: Text | None = None
     quantity: Annotated[Decimal, Field(gt=0, le=999999, decimal_places=4)] | None = None
     unit: Text | None = None
     unit_price: Amount | None = None
+    images: list[Annotated[str, Field(max_length=1000000)]] = Field(
+        default_factory=list, max_length=2
+    )
     image: str | None = Field(default=None, max_length=1000000)
 
 
@@ -43,7 +40,20 @@ class Evidence(Model):
     quote: str
 
 
+class AgreedTerm(Model):
+    term: Text
+    place: Text
+    edition: Text
+
+
 class Order(Model):
+    parties: list[Party] = Field(default_factory=list, max_length=4)
+    destination: Country | None = None
+    language: Literal["en", "de", "fr"] = "en"
+    insurance: Amount | None = None
+    tooling_fee: Amount | None = None
+    trade_term: AgreedTerm | None = None
+    acceptance_criteria: Text | None = None
     paper: Literal["A4", "Letter"] = "A4"
     valid_until: date | None = None
     ship_to: Text | None = None
@@ -84,7 +94,7 @@ class Totals(Model):
 
 
 def quantum(o):
-    return Decimal("1") if o.currency == "JPY" else Decimal("0.01")
+    return Decimal(1).scaleb(-minor_units(o.currency))
 
 
 def calculate(o: Order) -> Totals:
@@ -93,7 +103,16 @@ def calculate(o: Order) -> Totals:
             "Currency, items and explicit freight, fee and discount required"
         )
     q = quantum(o)
-    if any(x != x.quantize(q) for x in (o.freight, o.sample_fee, o.discount)):
+    if any(
+        x != x.quantize(q)
+        for x in (
+            o.freight,
+            o.sample_fee,
+            o.discount,
+            o.insurance or Decimal(0),
+            o.tooling_fee or Decimal(0),
+        )
+    ):
         raise ValueError("Fees and discount must use currency precision")
     lines = []
     for item in o.items:
@@ -101,7 +120,14 @@ def calculate(o: Order) -> Totals:
             raise ValueError(f"Missing quantity or unit price for {item.sku}")
         lines.append((item.quantity * item.unit_price).quantize(q, ROUND_HALF_UP))
     subtotal = sum(lines, Decimal(0))
-    total = subtotal + o.freight + o.sample_fee - o.discount
+    total = (
+        subtotal
+        + o.freight
+        + o.sample_fee
+        + (o.insurance or 0)
+        + (o.tooling_fee or 0)
+        - o.discount
+    )
     if total < 0 or total >= Decimal("1000000000000"):
         raise ValueError("Total outside supported Excel precision")
     installments = []
@@ -124,7 +150,7 @@ def calculate(o: Order) -> Totals:
     )
 
 
-def issues(o: Order) -> list[str]:
+def issues(o: Order, beneficiaries=None) -> list[str]:
     required = [
         "number",
         "issue_date",
@@ -139,14 +165,27 @@ def issues(o: Order) -> list[str]:
     if o.kind.startswith("sample"):
         required += ["sample_policy", "sample_credit", "customization"]
     errors = [f"Missing {k}" for k in required if not getattr(o, k)]
+    if len({p.role for p in o.parties}) != len(o.parties):
+        errors.append("Duplicate party role")
+    for p in o.parties:
+        if p.role in ("buyer", "seller") and getattr(o, p.role) != p.legal_name:
+            errors.append("Party name conflict: " + p.role)
+        if bool(p.tax_id) != bool(p.tax_id_type):
+            errors.append("Tax identifier and type required together")
     if len({i.sku for i in o.items}) != len(o.items):
         errors.append("Duplicate SKU")
+    if any(e.status == "disputed" for e in o.evidence):
+        errors.append("Disputed source evidence")
     if o.valid_until and o.issue_date and o.valid_until < o.issue_date:
         errors.append("Validity ends before issue date")
     if o.bank or o.beneficiary_ref:
-        import os, json
+        from .access import registry
 
-        verified = json.loads(os.environ.get("TRADE_DOC_BENEFICIARIES", "{}"))
+        verified = (
+            registry("TRADE_DOC_BENEFICIARIES")
+            if beneficiaries is None
+            else beneficiaries
+        )
         if (
             not o.beneficiary_ref
             or not o.bank
@@ -154,7 +193,7 @@ def issues(o: Order) -> list[str]:
         ):
             errors.append("Unverified beneficiary instructions")
     errors.extend(f"Unresolved: {question}" for question in o.unresolved)
-    if o.kind == "product-image-pi" and any(not i.image for i in o.items):
+    if o.kind == "product-image-pi" and any(not (i.image or i.images) for i in o.items):
         errors.append("Each image PI line requires a product image")
     for line in o.items:
         if not line.unit:

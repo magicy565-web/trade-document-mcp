@@ -70,5 +70,30 @@ def test_split_issue_and_reservation(order, monkeypatch):
     shipment.boxes[0].contents[0].quantity = Decimal(2)
     with pytest.raises(ValueError, match="remaining"):
         sh.create_shipment(snap.order_id, 1, shipment)
+    returned = sh.Adjustment(
+        shipment_id=saved.shipment_id,
+        version=1,
+        revision_digest=saved.digest,
+        reference="RT-1",
+        reason="Warehouse received one pair",
+        action="received_return",
+        quantities={"W-101": "1"},
+    )
+    receipt = sh.adjust_shipment(
+        returned, sign(canonical(returned.model_dump(mode="json")))
+    )
+    assert receipt.reference == "RT-1"
+    replacement = sh.create_shipment(snap.order_id, 1, shipment)
+    cancel = sh.Adjustment(
+        shipment_id=replacement.shipment_id,
+        version=1,
+        revision_digest=replacement.digest,
+        reference="CANCEL-1",
+        reason="Warehouse recalled pick",
+        action="cancel_draft",
+    )
+    sh.adjust_shipment(cancel, sign(canonical(cancel.model_dump(mode="json"))))
+    with pytest.raises(ValueError):
+        sh.preview_shipment(replacement.shipment_id, 1)
     Path(released.files[0]).write_bytes(b"changed")
     assert not sh.cross_check_documents(saved.shipment_id, 1).valid
