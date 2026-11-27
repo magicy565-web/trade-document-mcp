@@ -8,7 +8,9 @@ Text = Annotated[
 ]
 Amount = Annotated[Decimal, Field(ge=0, max_digits=12, decimal_places=4)]
 Kind = Literal["standard-pi", "product-image-pi", "sample-pi", "sample-order"]
-Currency = Literal["USD", "EUR", "GBP", "CNY", "JPY"]
+Currency = Literal[
+    "USD", "EUR", "GBP", "CNY", "JPY", "AUD", "CAD", "AED", "INR", "TRY", "MAD", "CHF"
+]
 
 
 class Model(BaseModel):
@@ -19,13 +21,21 @@ class Line(Model):
     sku: Text
     description: Text
     specification: Text | None = None
-    quantity: Annotated[int, Field(strict=True, gt=0, le=999999)] | None = None
+    quantity: Annotated[Decimal, Field(gt=0, le=999999, decimal_places=4)] | None = None
     unit: Text | None = None
     unit_price: Amount | None = None
     image: str | None = Field(default=None, max_length=1000000)
 
 
+class Milestone(Model):
+    event: Text
+    percent: Annotated[Decimal, Field(gt=0, le=100, decimal_places=4)]
+
+
 class Evidence(Model):
+    status: Literal["candidate", "requested", "quoted", "confirmed", "disputed"] = (
+        "candidate"
+    )
     field: str
     value: str
     source: str
@@ -34,6 +44,14 @@ class Evidence(Model):
 
 
 class Order(Model):
+    paper: Literal["A4", "Letter"] = "A4"
+    valid_until: date | None = None
+    ship_to: Text | None = None
+    seller_address: Text | None = None
+    buyer_address: Text | None = None
+    purchase_order: Text | None = None
+    schedule: list[Milestone] = Field(default_factory=list, max_length=12)
+    beneficiary_ref: Text | None = None
     kind: Kind
     number: Text | None = None
     issue_date: date | None = None
@@ -59,6 +77,7 @@ class Order(Model):
 
 
 class Totals(Model):
+    installments: list[Decimal] = Field(default_factory=list)
     lines: list[Decimal]
     subtotal: Decimal
     total: Decimal
@@ -85,7 +104,24 @@ def calculate(o: Order) -> Totals:
     total = subtotal + o.freight + o.sample_fee - o.discount
     if total < 0 or total >= Decimal("1000000000000"):
         raise ValueError("Total outside supported Excel precision")
-    return Totals(lines=lines, subtotal=subtotal, total=total.quantize(q))
+    installments = []
+    if o.schedule:
+        if sum(m.percent for m in o.schedule) != 100:
+            raise ValueError("Payment schedule must total 100 percent")
+        # Round cumulative entitlements so installments always reconcile.
+        cumulative = Decimal(0)
+        paid = Decimal(0)
+        for m in o.schedule:
+            cumulative += m.percent
+            due = (total * cumulative / 100).quantize(q, ROUND_HALF_UP)
+            installments.append(due - paid)
+            paid = due
+    return Totals(
+        installments=installments,
+        lines=lines,
+        subtotal=subtotal,
+        total=total.quantize(q),
+    )
 
 
 def issues(o: Order) -> list[str]:
@@ -103,6 +139,20 @@ def issues(o: Order) -> list[str]:
     if o.kind.startswith("sample"):
         required += ["sample_policy", "sample_credit", "customization"]
     errors = [f"Missing {k}" for k in required if not getattr(o, k)]
+    if len({i.sku for i in o.items}) != len(o.items):
+        errors.append("Duplicate SKU")
+    if o.valid_until and o.issue_date and o.valid_until < o.issue_date:
+        errors.append("Validity ends before issue date")
+    if o.bank or o.beneficiary_ref:
+        import os, json
+
+        verified = json.loads(os.environ.get("TRADE_DOC_BENEFICIARIES", "{}"))
+        if (
+            not o.beneficiary_ref
+            or not o.bank
+            or verified.get(o.beneficiary_ref) != o.bank
+        ):
+            errors.append("Unverified beneficiary instructions")
     errors.extend(f"Unresolved: {question}" for question in o.unresolved)
     if o.kind == "product-image-pi" and any(not i.image for i in o.items):
         errors.append("Each image PI line requires a product image")

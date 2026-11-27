@@ -11,7 +11,7 @@ from openpyxl.drawing.image import Image as XLImage
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4
+from reportlab.lib.pagesizes import A4, LETTER
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.platypus import (
@@ -53,6 +53,22 @@ LABELS = {
     "freight_payer": "Freight payable by",
     "bank": "Payment instructions",
 }
+
+
+def extra_details(o):
+    fields = [
+        ("Seller address", o.seller_address),
+        ("Buyer address", o.buyer_address),
+        ("Ship to", o.ship_to),
+        ("PO reference", o.purchase_order),
+        ("Valid until", o.valid_until),
+    ]
+    if o.schedule:
+        fields.extend(
+            (m.event + " (" + str(m.percent) + "%)", f"{o.currency} {amount}")
+            for m, amount in zip(o.schedule, calculate(o).installments)
+        )
+    return [(k, str(v)) for k, v in fields if v is not None]
 
 
 def picture(raw):
@@ -192,6 +208,15 @@ def workbook(o, title, path, template=None):
         ws.row_dimensions[n].height = max(
             30, 18 * (math.ceil(len(value) / 76) + value.count("\n"))
         )
+    extra = extra_details(o)
+    for label, value in extra:
+        ws.insert_rows(header)
+        literal(ws.cell(header, 1), label)
+        ws.merge_cells(start_row=header, start_column=2, end_row=header, end_column=6)
+        literal(ws.cell(header, 2), value)
+        ws.cell(header, 2).alignment = Alignment(wrap_text=True)
+        ws.row_dimensions[header].height = max(24, 16 * math.ceil(len(value) / 70))
+        header += 1
     band(header, HEAD)
     cache = {}
     amounts = calculate(o)
@@ -250,7 +275,9 @@ def workbook(o, title, path, template=None):
     ws.freeze_panes = f"C{header + 1}"
     ws.sheet_properties.pageSetUpPr.fitToPage = True
     ws.page_setup.fitToWidth, ws.page_setup.fitToHeight = 1, 0
-    ws.page_setup.paperSize = ws.PAPERSIZE_A4
+    ws.page_setup.paperSize = (
+        ws.PAPERSIZE_LETTER if o.paper == "Letter" else ws.PAPERSIZE_A4
+    )
     wb.save(path)
     cached_formulas(path, cache)
 
@@ -282,6 +309,8 @@ def pdf(o, title, path, version):
         if getattr(o, k) is not None
         or (k not in {"bank", "sample_policy", "sample_credit", "customization"})
     ]
+
+    details.extend([para(k), para(v)] for k, v in extra_details(o))
 
     def table(rows, widths, head=False):
         t = Table(rows, colWidths=widths, repeatRows=int(head), hAlign="LEFT")
@@ -351,7 +380,7 @@ def pdf(o, title, path, version):
 
     SimpleDocTemplate(
         str(path),
-        pagesize=A4,
+        pagesize=LETTER if o.paper == "Letter" else A4,
         leftMargin=16 * mm,
         rightMargin=16 * mm,
         topMargin=16 * mm,

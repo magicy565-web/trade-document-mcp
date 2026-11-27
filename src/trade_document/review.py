@@ -22,6 +22,7 @@ def main():
         snap.order
     ):
         raise SystemExit("Invalid review packet")
+    print(review.binding.model_dump_json(indent=2))
     print(snap.model_dump_json(indent=2))
     print(calculate(snap.order).model_dump_json(indent=2))
     if (
