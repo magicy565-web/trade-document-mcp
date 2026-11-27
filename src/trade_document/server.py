@@ -27,6 +27,22 @@ class TradeServer(FastMCP):
 
 
 mcp = TradeServer("Trade Document MCP")
+from . import shipments
+
+for tool in (
+    shipments.create_shipment,
+    shipments.get_shipment_preview,
+    shipments.draft_shipping_instruction,
+    shipments.revise_shipment,
+    shipments.validate_shipment,
+    shipments.preview_shipment,
+    shipments.export_document_bundle,
+    shipments.cross_check_documents,
+    shipments.prepare_customs_support,
+    shipments.draft_sales_contract,
+):
+    mcp.tool()(tool)
+
 from . import mapping
 
 for tool in (
