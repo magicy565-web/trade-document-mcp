@@ -27,6 +27,16 @@ class TradeServer(FastMCP):
 
 
 mcp = TradeServer("Trade Document MCP")
+from . import mapping
+
+for tool in (
+    mapping.inspect_template,
+    mapping.propose_template_mapping,
+    mapping.confirm_template_mapping,
+    mapping.validate_template,
+):
+    mcp.tool()(tool)
+
 from . import knowledge
 
 for name, fn in [
