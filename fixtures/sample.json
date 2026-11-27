@@ -1,0 +1,18 @@
+{
+  "kind": "sample-pi",
+  "number": "DEMO-S026",
+  "issue_date": "2026-11-28",
+  "seller": "Example Footwear Studio (fictional)",
+  "buyer": "Example Retail Lab (fictional)",
+  "currency": "USD",
+  "items": [
+    {"sku":"W-101","description":"White court sneaker","specification":"EU 38 / white upper","quantity":2,"unit":"pairs","unit_price":"15.25"},
+    {"sku":"W-102","description":"Canvas low-top sneaker","specification":"EU 39 / navy trim","quantity":1,"unit":"pair","unit_price":"18.00"}
+  ],
+  "sample_fee":"8.00","freight":"12.00","discount":"0.00",
+  "sample_policy":"charged","sample_credit":"USD 8 credited on a bulk order of 100 pairs.",
+  "customization":"Blue heel tab on the canvas pair.",
+  "payment":"Synthetic demo terms: prepaid sample order.",
+  "delivery":"Dispatch within 10 days of sample approval.",
+  "freight_payer":"Buyer","sources":["Synthetic QA brief, revision 1"]
+}
