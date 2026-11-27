@@ -37,6 +37,7 @@ def database():
           digest TEXT, reviewer TEXT, proof TEXT, created TEXT DEFAULT CURRENT_TIMESTAMP);
         CREATE TABLE IF NOT EXISTS artifacts(id TEXT PRIMARY KEY, order_id TEXT, version INTEGER,
           request_id TEXT, preview INTEGER, workbook TEXT, pdf TEXT);
+        CREATE TABLE IF NOT EXISTS template_reviews(id TEXT PRIMARY KEY,original BLOB,mapping TEXT,reviewer TEXT,signature TEXT);
         CREATE TABLE IF NOT EXISTS bindings(id TEXT PRIMARY KEY, body TEXT);
         CREATE TABLE IF NOT EXISTS templates(id TEXT PRIMARY KEY, name TEXT, content BLOB);
         """)
