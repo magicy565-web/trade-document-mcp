@@ -1,0 +1,202 @@
+{
+  "version": "0.2-design-draft",
+  "status": "design_only_not_runtime_rules",
+  "source_registry": "corpus/registry.json",
+  "default_scope": "commercial_pi and sample_pi",
+  "field_groups": {
+    "parties": [
+      "seller.legal_name",
+      "seller.address",
+      "buyer.legal_name",
+      "buyer.address",
+      "buyer.reference",
+      "ship_to",
+      "importer_of_record_when_applicable"
+    ],
+    "document": [
+      "document_id",
+      "purpose",
+      "issue_date",
+      "valid_until",
+      "revision",
+      "language",
+      "currency"
+    ],
+    "trade": [
+      "incoterm_if_agreed",
+      "named_place_if_incoterm",
+      "edition_if_incoterm",
+      "delivery_schedule",
+      "payment_schedule",
+      "verified_beneficiary_ref_if_payment_instructions"
+    ],
+    "items": [
+      "sku",
+      "description",
+      "variant",
+      "quantity_decimal",
+      "unit",
+      "unit_price",
+      "line_amount",
+      "country_of_origin_if_applicable",
+      "commodity_code_candidate_if_applicable",
+      "weight_dimensions_if_known"
+    ],
+    "fees": [
+      "freight",
+      "insurance",
+      "discount",
+      "sample_fee",
+      "tooling_fee",
+      "amount_payable"
+    ],
+    "sample": [
+      "sample_policy",
+      "customization",
+      "dispatch_address",
+      "acceptance_criteria",
+      "bulk_credit_conditions"
+    ],
+    "customs_only": [
+      "declared_goods_value",
+      "valuation_currency",
+      "valuation_basis",
+      "valuation_evidence",
+      "reason_for_export",
+      "importer_confirmation"
+    ]
+  },
+  "profiles": [
+    {
+      "region": "GLOBAL",
+      "sources": [
+        "US-ITA-PI",
+        "ICC-INCOTERMS"
+      ],
+      "purpose": "commercial_pi",
+      "policy": "required by product contract, not universal law",
+      "checks": [
+        "No unknown values silently defaulted",
+        "Approved currency, price, quantity and payment",
+        "If using Incoterms, include agreed term/place/edition",
+        "Decimal totals verified"
+      ]
+    },
+    {
+      "region": "EU",
+      "sources": [
+        "EU-A2M-CI",
+        "DE-IHK-PI",
+        "FR-BTS-2018"
+      ],
+      "purpose": "commercial_pi / customs_support",
+      "checks": [
+        "Commercial invoice compatibility without claiming PI is CI",
+        "Origin, unit and code when applicable",
+        "VAT/EORI conditional, distinct document types"
+      ],
+      "review": "pending professional review"
+    },
+    {
+      "region": "US",
+      "sources": [
+        "US-ITA-PI",
+        "US-CFR-141"
+      ],
+      "purpose": "commercial_pi / separate customs_substitute",
+      "checks": [
+        "Buyer/ship-to and PO ref supported",
+        "Customs substitute requires applicable basis and authorized importer, never default"
+      ],
+      "review": "pending current regulation check"
+    },
+    {
+      "region": "GB",
+      "sources": [
+        "GB-HMRC-PI"
+      ],
+      "purpose": "commercial_pi",
+      "checks": [
+        "Clearly distinguish PI from VAT invoice"
+      ],
+      "review": "pending"
+    },
+    {
+      "region": "CA",
+      "sources": [
+        "CA-CI1"
+      ],
+      "purpose": "customs_support",
+      "checks": [
+        "CI1 data compatibility; multiple party roles and origin"
+      ],
+      "review": "pending"
+    },
+    {
+      "region": "JP",
+      "sources": [
+        "JP-CUSTOMS-SAMPLE"
+      ],
+      "purpose": "customs_support",
+      "checks": [
+        "Free sample value not automatically zero, exemption assessed separately"
+      ],
+      "review": "pending"
+    },
+    {
+      "region": "AU",
+      "sources": [
+        "AU-ABF-FOC"
+      ],
+      "purpose": "customs_support",
+      "checks": [
+        "Evidence-based valuation separate from payable amount"
+      ],
+      "review": "pending"
+    },
+    {
+      "region": "AE",
+      "sources": [
+        "AE-ITA"
+      ],
+      "purpose": "country-specific import context",
+      "review": "secondary source only; no blocking rule",
+      "checks": [
+        "Confirm local official source and applicability"
+      ]
+    },
+    {
+      "region": "IN",
+      "sources": [
+        "IN-ITA"
+      ],
+      "purpose": "country-specific import context",
+      "review": "secondary source only; no blocking rule",
+      "checks": [
+        "Confirm local official source and applicability"
+      ]
+    },
+    {
+      "region": "TR",
+      "sources": [
+        "TR-ITA"
+      ],
+      "purpose": "country-specific import context",
+      "review": "secondary source only; no blocking rule",
+      "checks": [
+        "Confirm local official source and applicability"
+      ]
+    },
+    {
+      "region": "MA",
+      "sources": [
+        "MA-ITA"
+      ],
+      "purpose": "country-specific import context",
+      "review": "secondary source only; no blocking rule",
+      "checks": [
+        "Confirm local official source and applicability"
+      ]
+    }
+  ]
+}

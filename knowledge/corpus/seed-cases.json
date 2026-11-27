@@ -1,0 +1,158 @@
+{
+  "classification": "project_authored_synthetic_regression_not_real_orders_not_blind_eval",
+  "cases": [
+    {
+      "id": "SYN-EU-DECIMAL",
+      "region": "EU",
+      "purpose": "commercial_pi",
+      "source_refs": [
+        "US-ITA-PI",
+        "EU-A2M-CI"
+      ],
+      "input": {
+        "currency": "EUR",
+        "quantity": "12.5",
+        "unit": "m2",
+        "unit_price": "8.40",
+        "freight": "10.00",
+        "discount": "0.00"
+      },
+      "expected": {
+        "goods_amount": "105.00",
+        "amount_payable": "115.00",
+        "require_approval": true
+      }
+    },
+    {
+      "id": "SYN-US-DEPOSIT",
+      "region": "US",
+      "purpose": "commercial_pi",
+      "source_refs": [
+        "US-ITA-PI"
+      ],
+      "input": {
+        "currency": "USD",
+        "quantity": "40",
+        "unit": "pcs",
+        "unit_price": "12.50",
+        "freight": "50.00",
+        "deposit_ratio": "0.30",
+        "balance_ratio": "0.70"
+      },
+      "expected": {
+        "goods_amount": "500.00",
+        "amount_payable": "550.00",
+        "deposit": "165.00",
+        "balance": "385.00",
+        "require_approval": true
+      }
+    },
+    {
+      "id": "SYN-JP-FREE",
+      "region": "JP",
+      "purpose": "sample_pi",
+      "source_refs": [
+        "JP-CUSTOMS-SAMPLE"
+      ],
+      "input": {
+        "currency": "USD",
+        "quantity": "2",
+        "unit_price": "0.00",
+        "freight": "25.00",
+        "declared_goods_value": null
+      },
+      "expected": {
+        "amount_payable": "25.00",
+        "commercial_draft_allowed": true,
+        "customs_support_blocked_until_valuation": true
+      }
+    },
+    {
+      "id": "SYN-AU-FOC",
+      "region": "AU",
+      "purpose": "customs_support",
+      "source_refs": [
+        "AU-ABF-FOC"
+      ],
+      "input": {
+        "currency": "AUD",
+        "amount_payable": "0.00",
+        "declared_goods_value": "1.00",
+        "valuation_evidence": null
+      },
+      "expected": {
+        "block": true,
+        "reason": "unsupported arbitrary valuation"
+      }
+    },
+    {
+      "id": "SYN-US-14185",
+      "region": "US",
+      "purpose": "customs_substitute",
+      "source_refs": [
+        "US-CFR-141"
+      ],
+      "input": {
+        "seller_commercial_pi": true,
+        "importer_authorization": null
+      },
+      "expected": {
+        "block": true,
+        "reason": "not authorized importer statement"
+      }
+    },
+    {
+      "id": "SYN-GB-PI",
+      "region": "GB",
+      "purpose": "commercial_pi",
+      "source_refs": [
+        "GB-HMRC-PI"
+      ],
+      "input": {
+        "title": "VAT Invoice",
+        "document_kind": "proforma"
+      },
+      "expected": {
+        "block": true,
+        "reason": "document type mismatch"
+      }
+    },
+    {
+      "id": "SYN-CA-PARTIES",
+      "region": "CA",
+      "purpose": "customs_support",
+      "source_refs": [
+        "CA-CI1"
+      ],
+      "input": {
+        "vendor": "Synthetic Vendor",
+        "purchaser": "Synthetic Purchaser",
+        "consignee": "Synthetic Consignee",
+        "origin_by_line": [
+          "CN",
+          "VN"
+        ]
+      },
+      "expected": {
+        "preserve_distinct_parties": true,
+        "preserve_line_origin": true
+      }
+    },
+    {
+      "id": "SYN-TR-CONTEXT",
+      "region": "TR",
+      "purpose": "commercial_pi",
+      "source_refs": [
+        "TR-ITA"
+      ],
+      "input": {
+        "application_context": null,
+        "issue_date": "2026-01-01"
+      },
+      "expected": {
+        "review_only": true,
+        "no_unconditional_age_block": true
+      }
+    }
+  ]
+}
