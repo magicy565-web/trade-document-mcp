@@ -31,7 +31,7 @@ def test_real_stdio(order, tmp_path):
         async with stdio_client(params) as (r, w), ClientSession(r, w) as client:
             await client.initialize()
             schema = (await client.list_tools()).tools
-            assert len(schema) == 12 and all(t.outputSchema for t in schema)
+            assert len(schema) >= 18 and all(t.outputSchema for t in schema)
 
             async def call(name, args, error=False):
                 result = await client.call_tool(name, args)
