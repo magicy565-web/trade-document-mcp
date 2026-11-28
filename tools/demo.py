@@ -5,8 +5,11 @@ import base64
 import json
 import os
 from pathlib import Path
+from io import BytesIO
+from PIL import Image, ImageDraw
 import shutil
 import tempfile
+from decimal import Decimal
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from trade_document import server
 from trade_document.approval import Proof, message
@@ -39,9 +42,28 @@ def main():
     with tempfile.TemporaryDirectory() as temp:
         os.environ["TRADE_DOC_HOME"] = temp
         key = configure_fixture_reviewer()
-        for kind in ["sample-pi", "sample-order"]:
+        for kind in server.TITLES:
             order = Order.model_validate_json(FIXTURE.read_bytes())
             order.kind = kind
+            order.number = "DEMO-" + kind.upper()
+            if kind in ("standard-pi", "product-image-pi"):
+                order.sample_policy = None
+                order.sample_credit = None
+                order.customization = None
+                order.sample_fee = Decimal("0")
+            if kind == "standard-pi":
+                order.paper = "Letter"
+            if kind == "product-image-pi":
+                for item in order.items:
+                    image = Image.new("RGB", (180, 80), "#e4f4f2")
+                    ImageDraw.Draw(image).polygon(
+                        [(12, 66), (48, 30), (84, 47), (142, 51), (166, 65)],
+                        fill="#245260",
+                    )
+                    stream = BytesIO()
+                    image.save(stream, format="PNG")
+                    item.image = base64.b64encode(stream.getvalue()).decode()
+                    item.additional_images = [item.image]
             s = server.create_order_draft(order)
             server.preview_document(s.order_id, 1)
             review = server.request_approval(s.order_id, 1)

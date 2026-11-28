@@ -37,6 +37,9 @@ def database():
           digest TEXT, reviewer TEXT, proof TEXT, created TEXT DEFAULT CURRENT_TIMESTAMP);
         CREATE TABLE IF NOT EXISTS artifacts(id TEXT PRIMARY KEY, order_id TEXT, version INTEGER,
           request_id TEXT, preview INTEGER, workbook TEXT, pdf TEXT);
+        CREATE TABLE IF NOT EXISTS beneficiaries(ref TEXT,version INTEGER,body TEXT,verifier TEXT,authorizer TEXT,PRIMARY KEY(ref,version));
+        CREATE TABLE IF NOT EXISTS preview_basis(artifact TEXT PRIMARY KEY, digest TEXT);
+        CREATE TABLE IF NOT EXISTS bindings(id TEXT PRIMARY KEY, body TEXT);
         CREATE TABLE IF NOT EXISTS templates(id TEXT PRIMARY KEY, name TEXT, content BLOB);
         """)
         db.execute("BEGIN IMMEDIATE")
@@ -73,12 +76,15 @@ def current(db, oid, version=None):
         if rows["version"] < latest
         else {None: "draft", 0: "awaiting_review", 1: "issued"}[state]
     )
+    order = Order.model_validate_json(rows["body"])
+    if sha(rows["body"].encode()) != rows["digest"]:
+        raise ValueError("Stored revision digest mismatch")
     return Snapshot(
         order_id=oid,
         version=rows["version"],
-        digest=rows["digest"],
+        digest=sha(canonical(order.model_dump(mode="json"))),
         approval_status=status,
-        order=Order.model_validate_json(rows["body"]),
+        order=order,
     )
 
 

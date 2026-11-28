@@ -11,6 +11,7 @@ dependencies = ["mcp>=1.29,<2","pydantic>=2.11,<3","openpyxl>=3.1,<4","reportlab
 test = ["pytest>=8,<10"]
 [project.scripts]
 trade-doc-mcp = "trade_document.server:main"
+trade-doc-finance = "trade_document.finance:main"
 trade-doc-review = "trade_document.review:main"
 [tool.setuptools.packages.find]
 where = ["src"]
