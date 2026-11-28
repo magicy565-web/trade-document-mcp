@@ -29,6 +29,18 @@ class TradeServer(FastMCP):
 
 
 mcp = TradeServer("Trade Document MCP")
+from . import knowledge
+
+for name, fn in [
+    ("list_jurisdiction_profiles", knowledge.profiles),
+    ("get_rule_evidence", knowledge.source),
+    ("get_source_reference", knowledge.source),
+    ("search_knowledge", knowledge.search),
+    ("resolve_document_requirements", knowledge.requirements),
+    ("validate_jurisdiction", knowledge.requirements),
+]:
+    mcp.tool(name=name)(fn)
+
 Id = Annotated[str, Field(pattern=r"^[0-9a-f]{32}$")]
 Version = Annotated[int, Field(ge=1, strict=True)]
 

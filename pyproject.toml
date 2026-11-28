@@ -13,7 +13,10 @@ test = ["pytest>=8,<10"]
 trade-doc-mcp = "trade_document.server:main"
 trade-doc-finance = "trade_document.finance:main"
 trade-doc-review = "trade_document.review:main"
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.setuptools]
+packages = ["trade_document", "trade_knowledge"]
+package-dir = {trade_document="src/trade_document", trade_knowledge="knowledge"}
+[tool.setuptools.package-data]
+trade_knowledge = ["*.json","corpus/*.json"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
